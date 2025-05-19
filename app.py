@@ -1,128 +1,130 @@
-from flask import Flask, render_template, request, redirect, url_for, session, send_file, flash
-import sqlite3
-from flask_bcrypt import Bcrypt
-import datetime
-import pdfkit
+# app.py
+
+from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, login_user, login_required, logout_user, current_user
+from flask_mail import Mail, Message
+from werkzeug.security import generate_password_hash, check_password_hash
 import os
-from functools import wraps
+import json
+from datetime import datetime
+from scan_utils import perform_scan
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'  # Change this in production
-bcrypt = Bcrypt(app)
+app.secret_key = 'your_secret_key_here'
 
-# ========== DB FUNCTIONS ==========
+# Configurations
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///drillengine.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = 'your_email@gmail.com'
+app.config['MAIL_PASSWORD'] = 'your_password'
 
-def get_user_by_username(username):
-    conn = sqlite3.connect('users.db')
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE username = ?", (username,))
-    user = cur.fetchone()
-    conn.close()
-    return user
+# Initialize Extensions
+db = SQLAlchemy(app)
+mail = Mail(app)
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
 
-def create_user(username, email, password_hash):
-    conn = sqlite3.connect('users.db')
-    cur = conn.cursor()
-    cur.execute("INSERT INTO users (username, email, password) VALUES (?, ?, ?)", (username, email, password_hash))
-    conn.commit()
-    conn.close()
+# Models
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), nullable=False, unique=True)
+    email = db.Column(db.String(150), nullable=False, unique=True)
+    password = db.Column(db.String(256), nullable=False)
 
-def save_scan(user_id, url, result):
-    conn = sqlite3.connect('users.db')
-    cur = conn.cursor()
-    cur.execute("INSERT INTO scans (user_id, url, result, scan_date) VALUES (?, ?, ?, ?)",
-                (user_id, url, result, datetime.datetime.now()))
-    conn.commit()
-    conn.close()
+class ScanResult(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    url = db.Column(db.String(255))
+    result_data = db.Column(db.Text)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
-def get_scans_by_user(user_id):
-    conn = sqlite3.connect('users.db')
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM scans WHERE user_id = ? ORDER BY scan_date DESC", (user_id,))
-    scans = cur.fetchall()
-    conn.close()
-    return scans
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
 
-# ========== AUTH DECORATOR ==========
-
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'user' not in session:
-            return redirect('/login')
-        return f(*args, **kwargs)
-    return decorated_function
-
-# ========== ROUTES ==========
-
+# Routes
 @app.route('/')
 def landing():
     return render_template('landing.html')
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        user = get_user_by_username(username)
-        if user and bcrypt.check_password_hash(user[3], password):
-            session['user'] = {'id': user[0], 'username': user[1]}
-            return redirect('/index')
-        else:
-            flash('Invalid username or password', 'danger')
-            return redirect('/login')
-    return render_template('login.html')
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
     if request.method == 'POST':
         username = request.form['username']
         email = request.form['email']
-        password = request.form['password']
-        hashed = bcrypt.generate_password_hash(password).decode('utf-8')
-        create_user(username, email, hashed)
-        flash('Account created! You can now log in.', 'success')
-        return redirect('/login')
+        password = generate_password_hash(request.form['password'])
+
+        existing_user = User.query.filter_by(email=email).first()
+        if existing_user:
+            flash('User already exists!', 'danger')
+            return redirect(url_for('signup'))
+
+        user = User(username=username, email=email, password=password)
+        db.session.add(user)
+        db.session.commit()
+
+        flash('Account created! Please login.', 'success')
+        return redirect(url_for('login'))
+
     return render_template('signup.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form['email']
+        password = request.form['password']
+        user = User.query.filter_by(email=email).first()
+
+        if user and check_password_hash(user.password, password):
+            session['user_id'] = user.id
+            return redirect(url_for('index'))
+        else:
+            flash('Invalid credentials', 'danger')
+
+    return render_template('login.html')
 
 @app.route('/logout')
 def logout():
-    session.pop('user', None)
-    return redirect('/')
+    session.pop('user_id', None)
+    return redirect(url_for('landing'))
 
-@app.route('/index', methods=['GET'])
-@login_required
+@app.route('/index', methods=['GET', 'POST'])
 def index():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        url = request.form['url']
+        result = perform_scan(url)
+        result_json = json.dumps(result, indent=2)
+
+        new_result = ScanResult(user_id=session['user_id'], url=url, result_data=result_json)
+        db.session.add(new_result)
+        db.session.commit()
+
+        return redirect(url_for('results', scan_id=new_result.id))
+
     return render_template('index.html')
 
-@app.route('/scan', methods=['POST'])
-@login_required
-def scan():
-    url = request.form['url']
-    result = f"Scan complete for {url}. No major issues detected."  # Placeholder result
-    save_scan(session['user']['id'], url, result)
-    session['latest_result'] = result
-    return redirect('/results')
-
-@app.route('/results')
-@login_required
-def results():
-    result = session.get('latest_result', 'No scan performed.')
+@app.route('/results/<int:scan_id>')
+def results(scan_id):
+    result = ScanResult.query.get_or_404(scan_id)
     return render_template('results.html', result=result)
 
-@app.route('/download_pdf')
-@login_required
-def download_pdf():
-    result = session.get('latest_result', 'No scan performed.')
-    filename = f"scan_result_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
-    pdfkit.from_string(result, filename)
-    return send_file(filename, as_attachment=True)
-
 @app.route('/dashboard')
-@login_required
 def dashboard():
-    scans = get_scans_by_user(session['user']['id'])
-    return render_template('dashboard.html', scans=scans)
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    user_scans = ScanResult.query.filter_by(user_id=session['user_id']).order_by(ScanResult.timestamp.desc()).all()
+    return render_template('dashboard.html', scans=user_scans)
 
 if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
     app.run(debug=True)
