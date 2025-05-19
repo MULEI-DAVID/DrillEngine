@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Scan Results - DrillEngine</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <style>
+    body {
+      background-image: url('');
+      background-size: cover;
+      background-position: center;
+      background-attachment: fixed;
+      color: white;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header, footer {
+      background-color: rgba(0, 0, 0, 0.7);
+    }
+    .results-section {
+      flex-grow: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 60px 20px;
+    }
+    .results-box {
+      background-color: rgba(0, 0, 0, 0.6);
+      padding: 30px;
+      border-radius: 15px;
+      width: 100%;
+      max-width: 600px;
+      box-shadow: 0 0 20px rgba(0,0,0,0.6);
+    }
+    .results-box ul {
+      padding-left: 1.2rem;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header/Navbar -->
+  <header class="py-3">
+    <nav class="navbar navbar-expand-lg navbar-dark container">
+      <a class="navbar-brand fw-bold" href="index.html">DrillEngine</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navLinks">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse justify-content-end" id="navLinks">
+        <ul class="navbar-nav">
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+              👤
+            </a>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="/dashboard">Dashboard</a></li>
+              <li><a class="dropdown-item" href="/profile">My Profile</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item text-danger" href="landing.html">Logout</a></li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+    </nav>
+  </header>
+
+  <!-- Scan Results Section -->
+  <main class="results-section">
+    <div class="results-box">
+      <h3 class="text-center mb-4">Scan Results</h3>
+      <p><strong>Scanned URL:</strong> <span class="text-info">{{ url }}</span></p>
+      <p><strong>Date:</strong> {{ date }}</p>
+
+      <hr class="text-white" />
+
+      <h5 class="mb-3 text-warning">Findings:</h5>
+      <ul class="text-light">
+        {% for result in results %}
+          <li>{{ result }}</li>
+        {% else %}
+          <li>No issues detected.</li>
+        {% endfor %}
+      </ul>
+
+      <div class="mt-4 text-center">
+        <a href="{{ url_for('download_pdf', scan_id=scan_id) }}" class="btn btn-success">📄 Download PDF Report</a>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="text-center text-light py-3">
+    &copy; 2025 DrillEngine. All rights reserved.
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
