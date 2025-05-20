@@ -1,134 +1,158 @@
-from flask import Flask, render_template, request, redirect, url_for, session, send_file, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, session, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime
+from flask_login import LoginManager, login_user, login_required, logout_user, current_user, UserMixin
+from werkzeug.utils import secure_filename
 import os
+import subprocess
+import smtplib
+from email.mime.text import MIMEText
 
 app = Flask(__name__)
-app.secret_key = 'drillengine_secret_key'
-
-# Database setup
+app.config['SECRET_KEY'] = 'your_secret_key'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///drillengine.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['UPLOAD_FOLDER'] = 'static/uploads'
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024  # 2MB limit
 
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+
+# Initialize extensions
 db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
 
-# Models
-class User(db.Model):
+# User and Scan models
+class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(100), nullable=False)
-    email = db.Column(db.String(100), unique=True, nullable=False)
-    password = db.Column(db.String(200), nullable=False)
-    scans = db.relationship('ScanResult', backref='user', lazy=True)
+    username = db.Column(db.String(150), nullable=False, unique=True)
+    email = db.Column(db.String(150), nullable=False, unique=True)
+    password = db.Column(db.String(150), nullable=False)
+    phone = db.Column(db.String(20))
+    address = db.Column(db.String(200))
+    first_name = db.Column(db.String(100))
+    last_name = db.Column(db.String(100))
+    profile_pic = db.Column(db.String(200))
+    email_alerts = db.Column(db.Boolean, default=True)
+    using_2fa = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
 
-class ScanResult(db.Model):
+class Scan(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    url = db.Column(db.String(200), nullable=False)
-    result = db.Column(db.Text, nullable=False)
-    scanned_on = db.Column(db.DateTime, default=datetime.utcnow)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    target_url = db.Column(db.String(255))
+    result = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
 
-# Routes
-@app.route('/')
-def landing():
-    return render_template('landing.html')
+# Load user
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
 
-@app.route('/signup', methods=['GET', 'POST'])
-def signup():
-    if request.method == 'POST':
-        username = request.form['username']
-        email = request.form['email']
-        password = generate_password_hash(request.form['password'])
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-        if User.query.filter_by(email=email).first():
-            flash('Email already registered.', 'danger')
-            return redirect(url_for('signup'))
+def run_nmap_scan(target):
+    try:
+        result = subprocess.check_output(['nmap', '-F', target], stderr=subprocess.STDOUT).decode()
+        return result
+    except subprocess.CalledProcessError as e:
+        return e.output.decode()
 
-        user = User(username=username, email=email, password=password)
-        db.session.add(user)
-        db.session.commit()
-        session['user_id'] = user.id
-        session['username'] = user.username
-        return redirect(url_for('dashboard'))
-    return render_template('signup.html')
+def send_email_alert(to_email, subject, body):
+    try:
+        from_email = os.getenv('ALERT_EMAIL_ADDRESS')
+        password = os.getenv('ALERT_EMAIL_PASSWORD')
+        msg = MIMEText(body)
+        msg['Subject'] = subject
+        msg['From'] = from_email
+        msg['To'] = to_email
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        email = request.form['email']
-        password = request.form['password']
-        user = User.query.filter_by(email=email).first()
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(from_email, password)
+            smtp.sendmail(from_email, to_email, msg.as_string())
+    except Exception as e:
+        print(f"Email error: {e}")
 
-        if user and check_password_hash(user.password, password):
-            session['user_id'] = user.id
-            session['username'] = user.username
-            return redirect(url_for('dashboard'))
-        flash('Invalid credentials.', 'danger')
-    return render_template('login.html')
-
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('landing'))
-
-@app.route('/dashboard')
-def dashboard():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    user_id = session['user_id']
-    scans = ScanResult.query.filter_by(user_id=user_id).order_by(ScanResult.scanned_on.desc()).all()
-    return render_template('dashboard.html', scans=scans)
-
-@app.route('/index')
-def index():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    return render_template('index.html')
+@app.route('/profile')
+@login_required
+def profile():
+    scans = Scan.query.filter_by(user_id=current_user.id).order_by(Scan.created_at.desc()).all()
+    return render_template('profile.html', user=current_user, scans=scans)
 
 @app.route('/scan', methods=['POST'])
+@login_required
 def scan():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
+    try:
+        target_url = request.form['target_url']
+        scan_result = run_nmap_scan(target_url)
+        new_scan = Scan(user_id=current_user.id, target_url=target_url, result=scan_result)
+        db.session.add(new_scan)
+        db.session.commit()
 
-    url = request.form['url']
-    dummy_result = f"Scan complete for {url}. No critical issues found."
+        if current_user.email_alerts:
+            send_email_alert(current_user.email, "New Scan Completed", f"Scan of {target_url} completed.")
 
-    scan = ScanResult(url=url, result=dummy_result, user_id=session['user_id'])
-    db.session.add(scan)
+        flash('Scan completed successfully.', 'success')
+    except Exception as e:
+        flash(f'Scan failed: {str(e)}', 'danger')
+    return redirect(url_for('profile'))
+
+@app.route('/upload_picture', methods=['POST'])
+@login_required
+def upload_picture():
+    if 'profile_pic' not in request.files:
+        flash('No file selected.', 'danger')
+        return redirect(url_for('profile'))
+
+    file = request.files['profile_pic']
+    if file.filename == '':
+        flash('No file selected.', 'danger')
+        return redirect(url_for('profile'))
+
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(path)
+
+        current_user.profile_pic = filename
+        db.session.commit()
+        flash('Profile picture updated.', 'success')
+    else:
+        flash('Invalid file type.', 'danger')
+    return redirect(url_for('profile'))
+
+@app.route('/update_profile', methods=['POST'])
+@login_required
+def update_profile():
+    current_user.first_name = request.form['first_name']
+    current_user.last_name = request.form['last_name']
+    current_user.phone = request.form['phone']
+    current_user.address = request.form['address']
     db.session.commit()
-    return redirect(url_for('results', scan_id=scan.id))
+    flash('Profile updated successfully.', 'success')
+    return redirect(url_for('profile'))
 
-@app.route('/results/<int:scan_id>')
-def results(scan_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    scan = ScanResult.query.get_or_404(scan_id)
-    if scan.user_id != session['user_id']:
-        flash("Access denied.", "danger")
-        return redirect(url_for('dashboard'))
-    return render_template('results.html', scan=scan)
+@app.route('/update_security', methods=['POST'])
+@login_required
+def update_security():
+    email = request.form['email']
+    password = request.form['password']
+    confirm_password = request.form['confirm_password']
+    current_user.email = email
+    if password and password == confirm_password:
+        current_user.password = password
+    current_user.using_2fa = 'enable_2fa' in request.form
+    db.session.commit()
+    flash('Security settings updated.', 'success')
+    return redirect(url_for('profile'))
 
-@app.route('/download/<int:scan_id>')
-def download(scan_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-
-    scan = ScanResult.query.get_or_404(scan_id)
-    if scan.user_id != session['user_id']:
-        flash("Unauthorized", "danger")
-        return redirect(url_for('dashboard'))
-
-    filename = f"scan_report_{scan.id}.txt"
-    filepath = os.path.join("temp", filename)
-    os.makedirs("temp", exist_ok=True)
-    with open(filepath, "w") as f:
-        f.write(scan.result)
-
-    return send_file(filepath, as_attachment=True)
-
-# Initialize DB if not exists
-with app.app_context():
-    db.create_all()
+@app.route('/update_settings', methods=['POST'])
+@login_required
+def update_settings():
+    current_user.email_alerts = 'email_alerts' in request.form
+    db.session.commit()
+    flash('Settings updated.', 'success')
+    return redirect(url_for('profile'))
 
 if __name__ == '__main__':
+    db.create_all()
     app.run(debug=True)

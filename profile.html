@@ -3,91 +3,176 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>My Profile - DrillEngine</title>
+  <title>Profile - DrillEngine</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
   <style>
     body {
-      background: linear-gradient(to right, #0f2027, #203a43, #2c5364);
-      color: white;
+      background: #0f172a;
+      color: #e2e8f0;
       min-height: 100vh;
-      display: flex;
-      flex-direction: column;
     }
-    .profile-box {
-      background-color: rgba(0, 0, 0, 0.6);
-      padding: 30px;
+    .profile-header {
+      background: #1e293b;
       border-radius: 10px;
-      max-width: 600px;
-      width: 100%;
-      margin: auto;
-      box-shadow: 0 0 15px rgba(0,0,0,0.5);
+      padding: 20px;
+      margin-bottom: 30px;
     }
-    .profile-img {
+    .avatar {
       width: 100px;
       height: 100px;
+      background-color: #38bdf8;
+      color: white;
+      font-size: 36px;
+      font-weight: bold;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .tab-link {
+      cursor: pointer;
+    }
+    .tab-link.active {
+      background-color: #334155;
+      color: #ffffff;
+    }
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    .profile-picture {
+      max-width: 120px;
+      max-height: 120px;
       object-fit: cover;
       border-radius: 50%;
-    }
-    header, footer {
-      background-color: rgba(0, 0, 0, 0.8);
     }
   </style>
 </head>
 <body>
 
-  <!-- Navbar -->
-  <header class="py-3">
-    <nav class="navbar navbar-expand-lg navbar-dark container">
-      <a class="navbar-brand fw-bold" href="/">DrillEngine</a>
-      <div class="collapse navbar-collapse justify-content-end">
-        <ul class="navbar-nav">
-          <li class="nav-item"><a class="nav-link" href="/dashboard">Dashboard</a></li>
-          <li class="nav-item"><a class="nav-link" href="/logout">Logout</a></li>
-        </ul>
+  <div class="container py-5">
+    <!-- Profile Header -->
+    <div class="profile-header d-flex flex-wrap align-items-center gap-4">
+      <div>
+        
+          <img src="{{ url_for('static', filename='uploads/' + user.profile_picture) }}" class="profile-picture" alt="Profile Picture">
+        
+          <div class="avatar"></div>
+        
       </div>
-    </nav>
-  </header>
-
-  <!-- Profile Content -->
-  <main class="container my-5">
-    <div class="profile-box text-center">
-      <h2 class="mb-4">My Profile</h2>
-
-      <form method="POST" action="/update_profile" enctype="multipart/form-data">
-        <!-- Profile Picture -->
-        <div class="mb-3">
-          <img src="{{ url_for('static', filename='profile_pics/default.png') }}" class="profile-img mb-2" alt="Profile Picture" />
-          <input type="file" name="profile_pic" class="form-control" />
-        </div>
-
-        <!-- User Info -->
-        <div class="mb-3">
-          <input type="text" class="form-control" name="username" placeholder="Username" value="{{ user.username }}" required />
-        </div>
-        <div class="mb-3">
-          <input type="email" class="form-control" name="email" placeholder="Email" value="{{ user.email }}" required />
-        </div>
-
-        <!-- Password Update -->
-        <div class="mb-3">
-          <input type="password" class="form-control" name="password" placeholder="New Password (leave blank to keep current)" />
-        </div>
-
-        <!-- Stats -->
-        <div class="mb-3">
-          <p>Total Scans: <strong>{{ user.scan_count }}</strong></p>
-        </div>
-
-        <button type="submit" class="btn btn-primary w-100">Update Profile</button>
-      </form>
+      <div class="flex-grow-1">
+        <h4 class="mb-1"></h4>
+        <p class="mb-0"><i class="fas fa-envelope me-2"></i></p>
+        <p class="mb-0"><i class="fas fa-phone me-2"></i></p>
+        <p class="mb-0"><i class="fas fa-map-marker-alt me-2"></i></p>
+        <span class="badge bg-success">Active</span>
+      </div>
+      <div class="text-end ms-auto">
+        <small>Joined: </small><br>
+        <button class="btn btn-outline-info btn-sm mt-2"><i class="fas fa-download me-1"></i>Export Profile</button>
+      </div>
     </div>
-  </main>
 
-  <!-- Footer -->
-  <footer class="text-center text-light py-3">
-    &copy; 2025 DrillEngine. All rights reserved.
-  </footer>
+    <!-- Tabs Navigation -->
+    <div class="row">
+      <div class="col-md-3 mb-4">
+        <div class="list-group">
+          <a class="list-group-item list-group-item-action tab-link active" onclick="showTab('profileTab')"><i class="fas fa-user me-2"></i>Profile</a>
+          <a class="list-group-item list-group-item-action tab-link" onclick="showTab('securityTab')"><i class="fas fa-shield-alt me-2"></i>Security</a>
+          <a class="list-group-item list-group-item-action tab-link" onclick="showTab('historyTab')"><i class="fas fa-history me-2"></i>Scan History</a>
+          <a class="list-group-item list-group-item-action tab-link" onclick="showTab('settingsTab')"><i class="fas fa-cog me-2"></i>Settings</a>
+        </div>
+      </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+      <div class="col-md-9">
+        <!-- Profile Tab -->
+        <div id="profileTab" class="tab-content active">
+          <h5><i class="fas fa-edit me-2"></i>Edit Profile</h5>
+          <form method="POST" action="/update_profile">
+            <div class="row mb-3">
+              <div class="col"><input type="text" name="first_name" class="form-control" placeholder="First Name" value=""></div>
+              <div class="col"><input type="text" name="last_name" class="form-control" placeholder="Last Name" value=""></div>
+            </div>
+            <input type="text" name="phone" class="form-control mb-3" placeholder="Phone Number" value="">
+            <input type="text" name="address" class="form-control mb-3" placeholder="Address" value="">
+            <button class="btn btn-success">Update Profile</button>
+          </form>
+
+          <hr class="my-4">
+          <h5><i class="fas fa-image me-2"></i>Upload Profile Picture</h5>
+          <form action="/upload_picture" method="post" enctype="multipart/form-data">
+            <input type="file" name="picture" class="form-control mb-3">
+            <button type="submit" class="btn btn-primary">Upload</button>
+          </form>
+        </div>
+
+        <!-- Security Tab -->
+        <div id="securityTab" class="tab-content">
+          <h5><i class="fas fa-lock me-2"></i>Security</h5>
+          <form method="POST" action="/update_security">
+            <input type="email" name="email" class="form-control mb-3" placeholder="Update Email" value="{{ user.email }}">
+            <input type="password" name="password" class="form-control mb-3" placeholder="New Password">
+            <input type="password" name="confirm_password" class="form-control mb-3" placeholder="Confirm Password">
+            <div class="form-check mb-3">
+              <input class="form-check-input" type="checkbox" id="2faToggle" name="enable_2fa">
+              <label class="form-check-label" for="2faToggle">Enable Two-Factor Authentication</label>
+            </div>
+            <button class="btn btn-warning">Update Security</button>
+          </form>
+        </div>
+
+        <!-- Scan History Tab -->
+        <div id="historyTab" class="tab-content">
+          <h5><i class="fas fa-list me-2"></i>Scan History</h5>
+          
+            <ul class="list-group">
+              
+                <li class="list-group-item bg-dark text-light d-flex justify-content-between align-items-center">
+                  <span></span>
+                  <small></small>
+                </li>
+              
+            </ul>
+          
+            <p>You haven't performed any scans yet.</p>
+          
+
+          <hr class="my-4">
+          <h5><i class="fas fa-bug me-2"></i>New Scan</h5>
+          <form method="POST" action="/scan">
+            <input type="text" name="target_url" class="form-control mb-3" placeholder="Enter URL or IP">
+            <button class="btn btn-info">Start Scan</button>
+          </form>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="settingsTab" class="tab-content">
+          <h5><i class="fas fa-tools me-2"></i>Settings</h5>
+          <form method="POST" action="/update_settings">
+            <div class="form-check mb-3">
+              <input class="form-check-input" type="checkbox" id="emailAlerts" name="email_alerts">
+              <label class="form-check-label" for="emailAlerts">Receive email alerts for new scans</label>
+            </div>
+            <button class="btn btn-danger">Delete Account</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function showTab(tabId) {
+      const tabs = document.querySelectorAll('.tab-content');
+      const links = document.querySelectorAll('.tab-link');
+      tabs.forEach(tab => tab.classList.remove('active'));
+      links.forEach(link => link.classList.remove('active'));
+      document.getElementById(tabId).classList.add('active');
+      event.target.classList.add('active');
+    }
+  </script>
+
 </body>
 </html>
